@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { createWorker } from 'tesseract.js';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Upload,
@@ -106,11 +107,7 @@ const calculateTotalTime = (start: string, end: string) => {
   }
 };
 
-const INITIAL_PRODUCTIONS: ProductionItem[] = [
-  { id: 'p1', collaboratorId: '1', role: 'Social Media', client: 'Banco de copys | Dra Tatiana Fagnani', activity: 'Organização', status: 'CONCLUÍDO', startTime: '06:20:00', endTime: '07:00:00', totalTime: '40m', date: '2026-03-14' },
-  { id: 'p2', collaboratorId: '2', role: 'Designer', client: 'Dr Leonardo Silvestrini', activity: 'EDIÇÃO DE VIDEO STC', status: 'CONCLUÍDO', startTime: '07:03:00', endTime: '07:20:00', totalTime: '17m', date: '2026-03-14' },
-  { id: 'p3', collaboratorId: '1', role: 'Social Media', client: 'Dr Cris | Arquivos da Bodyplastia', activity: 'Edição de Reels', status: 'CONCLUÍDO', startTime: '07:27:00', endTime: '08:00:00', totalTime: '33m', date: '2026-03-14' },
-];
+const INITIAL_PRODUCTIONS: ProductionItem[] = [];
 
 // --- Components ---
 
@@ -170,6 +167,9 @@ export default function FAHub() {
   // Team Management States
   const [isColabModalOpen, setIsColabModalOpen] = useState(false);
   const [editingColab, setEditingColab] = useState<Collaborator | null>(null);
+
+  // OCR Debug States
+  const [ocrDebug, setOcrDebug] = useState({ rawText: '', lineCount: 0, cellCounts: [] as number[] });
 
   // Logic: Filter Productions
   const filteredProductions = useMemo(() => {
@@ -250,29 +250,50 @@ export default function FAHub() {
     return { total, activeStaff, topClient, formattedTotalTime, topActivity };
   }, [productions]);
 
-  const handleProcess = () => {
-    if (!importForm.colabId) return;
+  const handleProcess = async () => {
+    if (!importForm.colabId || !pastedImage) return;
     setIsProcessing(true);
-    setTimeout(() => {
-      const mockExtracted = [
-        { originalLine: 2, client: "Banco de copys | Dra Tatiana Fagnani", activity: "Organização", status: "CONCLUÍDO", endTime: "07:00:00", startTime: "06:20:00", totalTime: "40m" },
-        { originalLine: 3, client: "Dr Leonardo Silvestrini", activity: "EDIÇÃO DE VIDEO STC", status: "CONCLUÍDO", endTime: "07:20:00", startTime: "07:03:00", totalTime: "17m" },
-        { originalLine: 4, client: "Dr Cris | Arquivos da Bodyplastia", activity: "Edição de Reels", status: "CONCLUÍDO", endTime: "08:00:00", startTime: "07:27:00", totalTime: "33m" },
-        { originalLine: 5, client: "Dr Gabriel Silva", activity: "POST INSTAGRAM", status: "CONCLUÍDO", endTime: "08:35:00", startTime: "08:05:00", totalTime: "30m" },
-        { originalLine: 6, client: "Clinica Sorriso", activity: "Copy para Anúncio", status: "CONCLUÍDO", endTime: "09:10:00", startTime: "08:42:00", totalTime: "28m" },
-        { originalLine: 7, client: "Dra Maria Paula", activity: "Interação Stories", status: "CONCLUÍDO", endTime: "09:40:00", startTime: "09:20:00", totalTime: "20m" },
-        { originalLine: 8, client: "Posto do Ar", activity: "Banner Promocional", status: "CONCLUÍDO", endTime: "10:15:00", startTime: "09:50:00", totalTime: "25m" },
-        { originalLine: 9, client: "Studio Pilates", activity: "Calendário Semanal", status: "CONCLUÍDO", endTime: "11:00:00", startTime: "10:20:00", totalTime: "40m" },
-        { originalLine: 10, client: "Dr Leonardo Silvestrini", activity: "Corte de Podcast", status: "CONCLUÍDO", endTime: "11:45:00", startTime: "11:15:00", totalTime: "30m" },
-        { originalLine: 11, client: "Banco de copys | Dra Tatiana Fagnani", activity: "Legendas", status: "CONCLUÍDO", endTime: "12:15:00", startTime: "11:55:00", totalTime: "20m" },
-        { originalLine: 12, client: "Dra Ana Clara", activity: "Landing Page", status: "CONCLUÍDO", endTime: "14:00:00", startTime: "12:50:00", totalTime: "1h 10m" },
-        { originalLine: 13, client: "Dr Leonardo Silvestrini", activity: "Thumbnail YouTube", status: "CONCLUÍDO", endTime: "14:30:00", startTime: "14:10:00", totalTime: "20m" },
-        { originalLine: 14, client: "Dr Leonardo Silvestrini", activity: "Subir p/ Drive", status: "CONCLUÍDO", endTime: "14:45:00", startTime: "14:35:00", totalTime: "10m" }
-      ];
-      setReviewItems(mockExtracted);
-      setIsProcessing(false);
+    setOcrDebug({ rawText: '', lineCount: 0, cellCounts: [] });
+
+    try {
+      const worker = await createWorker('por');
+      const { data: { text } } = await worker.recognize(pastedImage);
+      await worker.terminate();
+
+      const lines = text.split('\n').filter(line => line.trim().length > 0);
+      const dataLines = lines.slice(1); // Ignore row 1
+
+      const extracted = dataLines.map((line, idx) => {
+        // Simple heuristic for column splitting (Tesseract usually preserves some spacing or we can try common separators)
+        // If it's a spreadsheet print, we look for multiple spaces or tabs
+        const cells = line.split(/\s{2,}|\t/).map(c => c.trim()).filter(c => c.length > 0);
+
+        // Map according to rules: A=Cliente, B=Serviço, C=Status, D=Fim, E=Início
+        return {
+          originalLine: idx + 2,
+          client: cells[0] || "",
+          activity: cells[1] || "",
+          status: cells[2] || "",
+          endTime: cells[3] || "",
+          startTime: cells[4] || "",
+          totalTime: calculateTotalTime(cells[4] || "", cells[3] || "")
+        };
+      });
+
+      setOcrDebug({
+        rawText: text,
+        lineCount: lines.length,
+        cellCounts: dataLines.map(l => l.split(/\s{2,}|\t/).length)
+      });
+
+      setReviewItems(extracted);
       setIsReviewing(true);
-    }, 1500);
+    } catch (error) {
+      console.error("OCR Error:", error);
+      alert("Erro ao processar imagem. Verifique o console.");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const handleSaveReview = () => {
@@ -807,6 +828,33 @@ export default function FAHub() {
                             </label>
                           </div>
                         )}
+
+                        {pastedImage && (
+                          <div className="mt-8 p-6 bg-zinc-900 rounded-[24px] border border-white/5 overflow-hidden">
+                            <h5 className="text-[10px] font-bold text-[#7B61FF] uppercase tracking-widest mb-4 flex items-center gap-2">
+                              <FileSearch className="w-3 h-3" /> OCR DEBUG CONSOLE
+                            </h5>
+                            <div className="grid grid-cols-2 gap-4 mb-4">
+                              <div className="bg-black/40 p-3 rounded-xl border border-white/5">
+                                <p className="text-[9px] text-zinc-500 uppercase font-black mb-1">Linhas Detectadas</p>
+                                <p className="text-lg font-bold text-white">{ocrDebug.lineCount}</p>
+                              </div>
+                              <div className="bg-black/40 p-3 rounded-xl border border-white/5">
+                                <p className="text-[9px] text-zinc-500 uppercase font-black mb-1">Células/Linha (Média)</p>
+                                <p className="text-lg font-bold text-white">
+                                  {ocrDebug.cellCounts.length > 0
+                                    ? (ocrDebug.cellCounts.reduce((a, b) => a + b, 0) / ocrDebug.cellCounts.length).toFixed(1)
+                                    : '0'}
+                                </p>
+                              </div>
+                            </div>
+                            <div className="bg-black p-4 rounded-xl border border-white/10 max-h-40 overflow-y-auto custom-scrollbar">
+                              <p className="text-[10px] text-emerald-500 font-mono leading-relaxed whitespace-pre-wrap">
+                                {ocrDebug.rawText || (isProcessing ? "Lendo imagem..." : "Aguardando processamento...")}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
@@ -820,19 +868,29 @@ export default function FAHub() {
                           <table className="w-full text-left text-[11px]">
                             <thead className="bg-slate-50 border-b border-slate-100">
                               <tr>
+                                <th className="px-4 py-3 font-bold text-zinc-500 w-12 text-center">LINHA</th>
                                 <th className="px-4 py-3 font-bold text-zinc-500">CLIENTE</th>
                                 <th className="px-4 py-3 font-bold text-zinc-500">SERVIÇO</th>
-                                <th className="px-4 py-3 font-bold text-zinc-500 text-center w-20">FIM</th>
-                                <th className="px-4 py-3 font-bold text-zinc-500 text-center w-20">INÍCIO</th>
+                                <th className="px-4 py-3 font-bold text-zinc-500">STATUS</th>
+                                <th className="px-4 py-3 font-bold text-zinc-500 text-center w-16">FIM</th>
+                                <th className="px-4 py-3 font-bold text-zinc-500 text-center w-16">INÍCIO</th>
+                                <th className="px-4 py-3 font-bold text-zinc-500 text-right w-24">TOTAL</th>
                               </tr>
                             </thead>
-                            <tbody className="divide-y divide-slate-100 italic">
+                            <tbody className="divide-y divide-slate-100">
                               {reviewItems.map((item, idx) => (
-                                <tr key={idx}>
-                                  <td className="px-4 py-2 font-bold text-[#0B0F14]">{item.client}</td>
-                                  <td className="px-4 py-2 text-zinc-500">{item.activity}</td>
-                                  <td className="px-4 py-2 text-center text-emerald-500 font-bold font-mono">{item.endTime}</td>
-                                  <td className="px-4 py-2 text-center text-zinc-400 font-mono">{item.startTime}</td>
+                                <tr key={idx} className={cn(!item.client || !item.startTime || !item.endTime ? "bg-amber-50/50" : "")}>
+                                  <td className="px-4 py-2 text-center text-zinc-400 font-mono">{item.originalLine}</td>
+                                  <td className={cn("px-4 py-2 font-bold text-[#0B0F14]", !item.client && "bg-red-50 text-red-500 italic")}>{item.client || "Não detectado"}</td>
+                                  <td className="px-4 py-2 text-zinc-500">{item.activity || "---"}</td>
+                                  <td className="px-4 py-2">
+                                    <span className="px-2 py-0.5 rounded bg-slate-100 text-[10px] font-bold text-zinc-600">{item.status || "Pendente"}</span>
+                                  </td>
+                                  <td className={cn("px-4 py-2 text-center font-mono", !item.endTime && "text-red-500 bg-red-50")}>{item.endTime || "--:--"}</td>
+                                  <td className={cn("px-4 py-2 text-center font-mono", !item.startTime && "text-red-500 bg-red-50")}>{item.startTime || "--:--"}</td>
+                                  <td className="px-4 py-2 text-right font-black text-[#7B61FF]">
+                                    {item.totalTime === '0h' ? '---' : item.totalTime}
+                                  </td>
                                 </tr>
                               ))}
                             </tbody>
