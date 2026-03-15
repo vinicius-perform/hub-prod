@@ -297,29 +297,80 @@ export default function FAHub() {
       await worker.terminate();
 
       const lines = text.split('\n').filter(line => line.trim().length > 0);
-      const dataLines = lines.slice(1); // Ignore row 1
+      // Skip the first line if it looks like a header (contains common header words)
+      const isHeader = (l: string) => /cliente|servi[çc]o|status|fim|in[íi]cio/i.test(l);
+      const dataLinesRaw = isHeader(lines[0]) ? lines.slice(1) : lines;
 
-      const extracted = dataLines.map((line, idx) => {
-        // Simple heuristic for column splitting (Tesseract usually preserves some spacing or we can try common separators)
-        // If it's a spreadsheet print, we look for multiple spaces or tabs
-        const cells = line.split(/\s{2,}|\t/).map(c => c.trim()).filter(c => c.length > 0);
+      const extracted = dataLinesRaw.map((line, idx) => {
+        // Smarter extraction using Regex
+        // Pattern: [Client/Service Text] [Status] [Time 1] [Time 2] [Time 3]
 
-        // Map according to rules: A=Cliente, B=Serviço, C=Status, D=Fim, E=Início
+        // 1. Identify all time patterns (HH:MM:SS)
+        const timePattern = /(\d{1,2}:\d{2}:\d{2})/g;
+        const timesFound = line.match(timePattern) || [];
+
+        // 2. Identify Status
+        const statusPattern = /(CONCLU[ÍI]DO|PENDENTE|ANDAMENTO|EM ANDAMENTO)/i;
+        const statusMatch = line.match(statusPattern);
+        const status = statusMatch ? statusMatch[0] : "";
+
+        // 3. Identification by position
+        // Usually: Fim is first time, Inicio is second time (based on user request D=Fim, E=Inicio)
+        // But in the sheet provided: Column 4 is Fim, 5 is Inicio, 6 is Total
+        const endTime = timesFound[0] || "";
+        const startTime = timesFound[1] || "";
+        // If there's a 3rd time, it's the Total, but we calculate it anyway
+
+        // 4. Get the text before the status (Client + Service)
+        let textBeforeStatus = line;
+        if (statusMatch && statusMatch.index !== undefined) {
+          textBeforeStatus = line.substring(0, statusMatch.index).trim();
+        } else if (timesFound.length > 0 && timesFound[0]) {
+          // If no status, take text before first time
+          const firstTime = timesFound[0];
+          textBeforeStatus = line.split(firstTime)[0].trim();
+        }
+
+        // 5. Try to split Client and Service
+        // Heuristic: If there are multiple spaces, or if we find a service keyword
+        const serviceKeywords = ["PLANEJAMENTO", "Edição", "Postagem", "Story", "Reels", "Corte", "Copy", "Design"];
+        let client = textBeforeStatus;
+        let activity = "";
+
+        for (const kw of serviceKeywords) {
+          const kwRegex = new RegExp(`\\b${kw}\\b`, 'i');
+          const kwMatch = textBeforeStatus.match(kwRegex);
+          if (kwMatch && kwMatch.index !== undefined) {
+            client = textBeforeStatus.substring(0, kwMatch.index).trim();
+            activity = textBeforeStatus.substring(kwMatch.index).trim();
+            break;
+          }
+        }
+
+        // If no keyword match, try splitting by the last significant gap or just assume the last word(s)
+        if (!activity && client.includes("  ")) {
+          const parts = client.split(/\s{2,}/);
+          if (parts.length > 1) {
+            client = parts[0].trim();
+            activity = parts.slice(1).join(" ").trim();
+          }
+        }
+
         return {
           originalLine: idx + 2,
-          client: cells[0] || "",
-          activity: cells[1] || "",
-          status: cells[2] || "",
-          endTime: cells[3] || "",
-          startTime: cells[4] || "",
-          totalTime: calculateTotalTime(cells[4] || "", cells[3] || "")
+          client: client,
+          activity: activity,
+          status: status,
+          endTime: endTime,
+          startTime: startTime,
+          totalTime: calculateTotalTime(startTime, endTime)
         };
-      });
+      }).filter(item => item.client || item.startTime || item.endTime);
 
       setOcrDebug({
         rawText: text,
         lineCount: lines.length,
-        cellCounts: dataLines.map(l => l.split(/\s{2,}|\t/).length)
+        cellCounts: dataLinesRaw.map(l => l.split(/\s+/).length)
       });
 
       setReviewItems(extracted);
