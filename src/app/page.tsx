@@ -79,11 +79,7 @@ type ProductionItem = {
   date: string;
 };
 
-const DEFAULT_COLLABORATORS: Collaborator[] = [
-  { id: '1', name: 'Vinícius', role: 'Social Media', status: 'Ativo', createdAt: '2026-03-01' },
-  { id: '2', name: 'Ana Silva', role: 'Designer', status: 'Ativo', createdAt: '2026-03-05' },
-  { id: '3', name: 'Carlos Eduardo', role: 'Social Media', status: 'Ativo', createdAt: '2026-03-10' },
-];
+const DEFAULT_COLLABORATORS: Collaborator[] = [];
 
 const calculateTotalTime = (start: string, end: string) => {
   if (!start || !end) return '0h';
@@ -141,8 +137,8 @@ const SectionTitle = ({ title, subtitle }: { title: string, subtitle?: string })
 
 export default function FAHub() {
   const [activeTab, setActiveTab] = useState<string>('dashboard');
-  const [collaborators, setCollaborators] = useState<Collaborator[]>(DEFAULT_COLLABORATORS);
-  const [productions, setProductions] = useState<ProductionItem[]>(INITIAL_PRODUCTIONS);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [productions, setProductions] = useState<ProductionItem[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [roles, setRoles] = useState<Role[]>(['Social Media', 'Designer']);
 
@@ -170,6 +166,46 @@ export default function FAHub() {
 
   // OCR Debug States
   const [ocrDebug, setOcrDebug] = useState({ rawText: '', lineCount: 0, cellCounts: [] as number[] });
+
+  // Persistence Logic
+  useEffect(() => {
+    console.log("[STORAGE] Hydrating data from localStorage...");
+    try {
+      const storedColabs = localStorage.getItem('fa_prod_collaborators');
+      const storedRoles = localStorage.getItem('fa_prod_roles');
+      const storedProductions = localStorage.getItem('fa_prod_productions');
+
+      if (storedColabs) {
+        console.log("[STORAGE] Loaded collaborators:", JSON.parse(storedColabs).length);
+        setCollaborators(JSON.parse(storedColabs));
+      }
+      if (storedRoles) {
+        console.log("[STORAGE] Loaded roles:", JSON.parse(storedRoles));
+        setRoles(JSON.parse(storedRoles));
+      }
+      if (storedProductions) {
+        console.log("[STORAGE] Loaded productions:", JSON.parse(storedProductions).length);
+        setProductions(JSON.parse(storedProductions));
+      }
+    } catch (e) {
+      console.error("[STORAGE] Error hydrating data:", e);
+    }
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem('fa_prod_collaborators', JSON.stringify(collaborators));
+    console.log("[STORAGE] Collaborators saved/updated:", collaborators.length);
+  }, [collaborators]);
+
+  useEffect(() => {
+    localStorage.setItem('fa_prod_roles', JSON.stringify(roles));
+    console.log("[STORAGE] Roles saved/updated:", roles);
+  }, [roles]);
+
+  useEffect(() => {
+    localStorage.setItem('fa_prod_productions', JSON.stringify(productions));
+    console.log("[STORAGE] Productions saved/updated:", productions.length);
+  }, [productions]);
 
   // Logic: Filter Productions
   const filteredProductions = useMemo(() => {
@@ -316,6 +352,7 @@ export default function FAHub() {
   };
 
   const addCollaborator = (name: string, role: Role, status: 'Ativo' | 'Inativo' = 'Ativo') => {
+    console.log("[TEAM] Creating collaborator:", name);
     const newColab: Collaborator = {
       id: Math.random().toString(36).substr(2, 9),
       name,
@@ -327,10 +364,12 @@ export default function FAHub() {
   };
 
   const updateCollaborator = (id: string, updates: Partial<Collaborator>) => {
+    console.log("[TEAM] Updating collaborator:", id, updates);
     setCollaborators(prev => prev.map(c => c.id === id ? { ...c, ...updates } : c));
   };
 
   const toggleCollaboratorStatus = (id: string) => {
+    console.log("[TEAM] Toggling status for:", id);
     setCollaborators(prev => prev.map(c =>
       c.id === id ? { ...c, status: c.status === 'Ativo' ? 'Inativo' : 'Ativo' } : c
     ));
@@ -338,6 +377,7 @@ export default function FAHub() {
 
   const deleteCollaborator = (id: string) => {
     if (confirm('Tem certeza que deseja excluir este colaborador?')) {
+      console.log("[TEAM] Deleting collaborator:", id);
       setCollaborators(prev => prev.filter(c => c.id !== id));
       // Optionally remove their productions too
       setProductions(prev => prev.filter(p => p.collaboratorId !== id));
@@ -346,12 +386,14 @@ export default function FAHub() {
 
   const addRole = (role: string) => {
     if (role && !roles.includes(role)) {
+      console.log("[TEAM] Adding new role:", role);
       setRoles([...roles, role]);
     }
   };
 
   const deleteRole = (role: string) => {
     if (confirm(`Tem certeza que deseja excluir a função "${role}"?`)) {
+      console.log("[TEAM] Deleting role:", role);
       setRoles(roles.filter(r => r !== role));
     }
   };
@@ -998,72 +1040,88 @@ export default function FAHub() {
                   </button>
                 </div>
 
-                <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden">
-                  <table className="w-full text-left">
-                    <thead className="bg-slate-50 border-b border-slate-100">
-                      <tr>
-                        <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Nome</th>
-                        <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Função</th>
-                        <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
-                        <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Data de cadastro</th>
-                        <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-right">Ações</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                      {collaborators.map(c => (
-                        <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
-                          <td className="px-8 py-5">
-                            <div className="flex items-center gap-3">
-                              <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[#7B61FF] text-[10px]">{c.name[0]}</div>
-                              <span className="text-sm font-bold text-[#0B0F14]">{c.name}</span>
-                            </div>
-                          </td>
-                          <td className="px-8 py-5">
-                            <span className="text-xs font-medium text-zinc-500">{c.role}</span>
-                          </td>
-                          <td className="px-8 py-5">
-                            <span className={cn(
-                              "px-2 py-0.5 rounded text-[10px] font-black uppercase",
-                              c.status === 'Ativo' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
-                            )}>
-                              {c.status}
-                            </span>
-                          </td>
-                          <td className="px-8 py-5 text-sm text-zinc-400 font-medium">
-                            {c.createdAt}
-                          </td>
-                          <td className="px-8 py-5 text-right">
-                            <div className="flex items-center justify-end gap-2">
-                              <button
-                                onClick={() => { setEditingColab(c); setIsColabModalOpen(true); }}
-                                className="p-2 text-zinc-400 hover:text-[#7B61FF] hover:bg-[#7B61FF]/5 rounded-lg transition-all"
-                                title="Editar Colaborador"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                onClick={() => toggleCollaboratorStatus(c.id)}
-                                className={cn(
-                                  "p-2 rounded-lg transition-all",
-                                  c.status === 'Ativo' ? "text-zinc-400 hover:text-red-500 hover:bg-red-50" : "text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50"
-                                )}
-                                title={c.status === 'Ativo' ? "Desativar Colaborador" : "Ativar Colaborador"}
-                              >
-                                {c.status === 'Ativo' ? <Ban className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
-                              </button>
-                              <button
-                                onClick={() => deleteCollaborator(c.id)}
-                                className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
-                                title="Excluir Colaborador"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
-                          </td>
+                <div className="bg-white border border-slate-100 rounded-3xl shadow-sm overflow-hidden min-h-[400px] flex flex-col">
+                  {collaborators.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
+                      <div className="w-20 h-20 rounded-[32px] bg-slate-50 border border-slate-100 flex items-center justify-center mb-6 shadow-sm">
+                        <User className="w-10 h-10 text-zinc-300" />
+                      </div>
+                      <h3 className="text-xl font-bold text-[#0B0F14] tracking-tight">Nenhum colaborador cadastrado ainda</h3>
+                      <p className="text-zinc-500 mt-2 max-w-sm font-medium leading-relaxed italic">Cadastre o primeiro colaborador para começar a gerenciar sua equipe.</p>
+                      <button
+                        onClick={() => { setEditingColab(null); setIsColabModalOpen(true); }}
+                        className="mt-8 flex items-center gap-2 bg-[#0B0F14] text-white px-8 py-3 rounded-2xl font-bold text-xs hover:bg-slate-800 transition-all shadow-lg shadow-black/10"
+                      >
+                        <Plus className="w-4 h-4" /> Cadastrar Primeiro Colaborador
+                      </button>
+                    </div>
+                  ) : (
+                    <table className="w-full text-left">
+                      <thead className="bg-slate-50 border-b border-slate-100">
+                        <tr>
+                          <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Nome</th>
+                          <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Função</th>
+                          <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Status</th>
+                          <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Data de cadastro</th>
+                          <th className="px-8 py-5 text-[10px] font-bold text-zinc-500 uppercase tracking-widest text-right">Ações</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {collaborators.map(c => (
+                          <tr key={c.id} className="hover:bg-slate-50/50 transition-colors">
+                            <td className="px-8 py-5">
+                              <div className="flex items-center gap-3">
+                                <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[#7B61FF] text-[10px]">{c.name[0]}</div>
+                                <span className="text-sm font-bold text-[#0B0F14]">{c.name}</span>
+                              </div>
+                            </td>
+                            <td className="px-8 py-5">
+                              <span className="text-xs font-medium text-zinc-500">{c.role}</span>
+                            </td>
+                            <td className="px-8 py-5">
+                              <span className={cn(
+                                "px-2 py-0.5 rounded text-[10px] font-black uppercase",
+                                c.status === 'Ativo' ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+                              )}>
+                                {c.status}
+                              </span>
+                            </td>
+                            <td className="px-8 py-5 text-sm text-zinc-400 font-medium">
+                              {c.createdAt}
+                            </td>
+                            <td className="px-8 py-5 text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  onClick={() => { setEditingColab(c); setIsColabModalOpen(true); }}
+                                  className="p-2 text-zinc-400 hover:text-[#7B61FF] hover:bg-[#7B61FF]/5 rounded-lg transition-all"
+                                  title="Editar Colaborador"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  onClick={() => toggleCollaboratorStatus(c.id)}
+                                  className={cn(
+                                    "p-2 rounded-lg transition-all",
+                                    c.status === 'Ativo' ? "text-zinc-400 hover:text-red-500 hover:bg-red-50" : "text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50"
+                                  )}
+                                  title={c.status === 'Ativo' ? "Desativar Colaborador" : "Ativar Colaborador"}
+                                >
+                                  {c.status === 'Ativo' ? <Ban className="w-4 h-4" /> : <UserCheck className="w-4 h-4" />}
+                                </button>
+                                <button
+                                  onClick={() => deleteCollaborator(c.id)}
+                                  className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition-all"
+                                  title="Excluir Colaborador"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
                 </div>
 
                 <div className="mt-12">
